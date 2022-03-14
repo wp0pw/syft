@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/anchore/syft/syft/linux"
+	"github.com/vifraa/gopom"
 
 	"github.com/anchore/syft/internal"
 )
@@ -40,15 +41,23 @@ type PomProperties struct {
 
 // PomProject represents fields of interest extracted from a Java archive's pom.xml file. See https://maven.apache.org/ref/3.6.3/maven-model/maven.html for more details.
 type PomProject struct {
-	Path        string     `json:"path"`
-	Parent      *PomParent `json:"parent,omitempty"`
-	GroupID     string     `json:"groupId"`
-	ArtifactID  string     `json:"artifactId"`
-	Version     string     `json:"version"`
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	URL         string     `json:"url,omitempty"`
+	Path         string             `json:"path"`
+	Parent       *PomParent         `json:"parent,omitempty"`
+	GroupID      string             `json:"groupId"`
+	ArtifactID   string             `json:"artifactId"`
+	Version      string             `json:"version"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description,omitempty"`
+	URL          string             `json:"url,omitempty"`
+	Dependencies []Dependency       `hash:"ignore" json:"-"`
+	Properties   gopom.Properties   `hash:"ignore" json:"-"`
+	Organization gopom.Organization `hash:"ignore" json:"-"`
+	SCM          gopom.Scm          `hash:"ignore" json:"-"`
+	Licenses     []gopom.License    `hash:"ignore" json:"-"`
+	Developers   []gopom.Developer  `hash:"ignore" json:"-"`
 }
+
+type Dependency PomParent
 
 // PomParent contains the fields within the <parent> tag in a pom.xml file
 type PomParent struct {

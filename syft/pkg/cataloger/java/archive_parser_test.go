@@ -239,7 +239,7 @@ func TestParseJar(t *testing.T) {
 				t.Fatalf("failed to open fixture: %+v", err)
 			}
 
-			parser, cleanupFn, err := newJavaArchiveParser(fixture.Name(), fixture, false)
+			parser, cleanupFn, err := newJavaArchiveParser(fixture.Name(), fixture, false, false)
 			defer cleanupFn()
 			if err != nil {
 				t.Fatalf("should not have filed... %+v", err)

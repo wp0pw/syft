@@ -9,6 +9,7 @@ import (
 	"github.com/anchore/syft/internal/version"
 	"github.com/anchore/syft/syft/artifact"
 	"github.com/anchore/syft/syft/linux"
+	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/google/uuid"
@@ -151,6 +152,66 @@ func toDependencies(relationships []artifact.Relationship) []cyclonedx.Dependenc
 	return result
 }
 
+func handleFile(srcMetadata source.Metadata) *cyclonedx.Component {
+	bomRef, err := artifact.IDByHash(srcMetadata.Path)
+	if err != nil {
+		log.Warnf("unable to get fingerprint of source metadata path=%s: %+v", srcMetadata.Path, err)
+	}
+
+	hash := cyclonedx.Hash{
+		Algorithm: cyclonedx.HashAlgorithm(srcMetadata.FileMetadata.HashAlg),
+		Value:     srcMetadata.FileMetadata.Hash,
+	}
+
+	if meta, ok := srcMetadata.PackageMetadata.(pkg.JavaMetadata); ok {
+		var author string
+		var publisher string
+		// use SCM URL
+		if meta.PomProject.SCM.URL != "" {
+			author = meta.PomProject.SCM.URL
+			publisher = author
+		}
+
+		// or Org Name if available
+		if meta.PomProject.Organization.Name != "" {
+			author = meta.PomProject.Organization.Name
+			publisher = author
+		}
+
+		if len(meta.PomProject.Developers) != 0 {
+			author = meta.PomProject.Developers[0].Email
+			if publisher == "" {
+				publisher = author
+			}
+		}
+
+		return &cyclonedx.Component{
+			BOMRef:      string(bomRef),
+			Type:        cyclonedx.ComponentTypeFile,
+			Name:        meta.PomProject.ArtifactID,
+			Version:     meta.PomProject.Version,
+			Group:       meta.PomProject.GroupID,
+			Description: meta.PomProject.Description,
+			Author:      author,
+			Supplier: &cyclonedx.OrganizationalEntity{
+				Name: "Maven Repository",
+				URL:  &[]string{"https://mvnrepository.com/"},
+			},
+			Publisher:  publisher,
+			Hashes:     &[]cyclonedx.Hash{hash},
+			PackageURL: meta.PURL,
+		}
+	}
+
+	return &cyclonedx.Component{
+		BOMRef:  string(bomRef),
+		Type:    cyclonedx.ComponentTypeFile,
+		Name:    srcMetadata.Path,
+		Version: srcMetadata.FileMetadata.Version,
+		Hashes:  &[]cyclonedx.Hash{hash},
+	}
+}
+
 func toBomDescriptorComponent(srcMetadata source.Metadata) *cyclonedx.Component {
 	switch srcMetadata.Scheme {
 	case source.ImageScheme:
@@ -164,16 +225,19 @@ func toBomDescriptorComponent(srcMetadata source.Metadata) *cyclonedx.Component 
 			Name:    srcMetadata.ImageMetadata.UserInput,
 			Version: srcMetadata.ImageMetadata.ManifestDigest,
 		}
-	case source.DirectoryScheme, source.FileScheme:
+	case source.DirectoryScheme:
 		bomRef, err := artifact.IDByHash(srcMetadata.Path)
 		if err != nil {
 			log.Warnf("unable to get fingerprint of source metadata path=%s: %+v", srcMetadata.Path, err)
 		}
+
 		return &cyclonedx.Component{
 			BOMRef: string(bomRef),
 			Type:   cyclonedx.ComponentTypeFile,
 			Name:   srcMetadata.Path,
 		}
+	case source.FileScheme:
+		return handleFile(srcMetadata)
 	}
 
 	return nil

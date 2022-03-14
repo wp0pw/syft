@@ -7,6 +7,8 @@ package source
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -182,14 +184,33 @@ func NewFromDirectory(path string) (Source, error) {
 func NewFromFile(path string) (Source, func()) {
 	analysisPath, cleanupFn := fileAnalysisPath(path)
 
+	fileMeta := NewFileSourceMetadata(analysisPath)
+
 	return Source{
 		mutex: &sync.Mutex{},
 		Metadata: Metadata{
-			Scheme: FileScheme,
-			Path:   path,
+			Scheme:       FileScheme,
+			Path:         path,
+			FileMetadata: fileMeta,
 		},
 		path: analysisPath,
 	}, cleanupFn
+}
+
+func NewFileSourceMetadata(path string) FileSourceMetadata {
+	hash := sha256.New()
+	content, err := ioutil.ReadFile(path)
+	if err == nil {
+		hash.Write(content)
+
+		return FileSourceMetadata{
+			Hash:    hex.EncodeToString(hash.Sum([]byte{})),
+			HashAlg: "SHA-256",
+		}
+	}
+
+	log.Warnf("failed to read file: %s", err)
+	return FileSourceMetadata{}
 }
 
 // fileAnalysisPath returns the path given, or in the case the path is an archive, the location where the archive

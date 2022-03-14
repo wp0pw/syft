@@ -16,6 +16,7 @@ import (
 	"github.com/anchore/syft/syft/artifact"
 	"github.com/anchore/syft/syft/event"
 	"github.com/anchore/syft/syft/format"
+	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/pkg/cataloger"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
@@ -309,6 +310,26 @@ func packagesExecWorker(userInput string, writer sbom.Writer) <-chan error {
 			}
 		}
 
+		// TODO: this needs moving so parent goes to source and rest to deps
+		allPackages := s.Artifacts.PackageCatalog.Sorted()
+		var id artifact.ID
+		for _, p := range allPackages {
+			if p.MetadataType == pkg.JavaMetadataType {
+				m := p.Metadata.(pkg.JavaMetadata)
+
+				if m.Parent != nil && m.Parent.ID() == p.ID() {
+					id = p.ID()
+					if s.Source.Scheme == source.FileScheme {
+						s.Source.FileMetadata.Name = p.Name
+						s.Source.FileMetadata.Version = p.Version
+						s.Source.PackageMetadata = m.Parent.Metadata
+					}
+				}
+			}
+		}
+
+		s.Artifacts.PackageCatalog.Remove(id)
+
 		bus.Publish(partybus.Event{
 			Type:  event.Exit,
 			Value: func() error { return writer.Write(*s) },
@@ -323,7 +344,6 @@ func mergeRelationships(cs ...<-chan artifact.Relationship) (relationships []art
 			relationships = append(relationships, n)
 		}
 	}
-
 	return relationships
 }
 

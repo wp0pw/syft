@@ -24,16 +24,38 @@ func parsePomXML(path string, reader io.Reader) (*pkg.PomProject, error) {
 		return nil, fmt.Errorf("unable to unmarshal pom.xml: %w", err)
 	}
 
-	return &pkg.PomProject{
-		Path:        path,
-		Parent:      pomParent(project.Parent),
-		GroupID:     project.GroupID,
-		ArtifactID:  project.ArtifactID,
-		Version:     project.Version,
-		Name:        project.Name,
-		Description: cleanDescription(project.Description),
-		URL:         project.URL,
-	}, nil
+	pomProj := &pkg.PomProject{
+		Path:         path,
+		Parent:       pomParent(project.Parent),
+		GroupID:      project.GroupID,
+		ArtifactID:   project.ArtifactID,
+		Version:      project.Version,
+		Name:         project.Name,
+		Description:  cleanDescription(project.Description),
+		URL:          project.URL,
+		Dependencies: []pkg.Dependency{},
+		Properties:   project.Properties,
+		Organization: project.Organization,
+		SCM:          project.SCM,
+		Licenses:     project.Licenses,
+		Developers:   project.Developers,
+	}
+
+	for _, dep := range project.DependencyManagement.Dependencies {
+		if dep.Scope != "compile" && dep.Scope != "runtime" && dep.Scope != "" {
+			continue
+		}
+		pomProj.Dependencies = append(pomProj.Dependencies, pkg.Dependency{ArtifactID: dep.ArtifactID, Version: dep.Version, GroupID: dep.GroupID})
+	}
+
+	for _, dep := range project.Dependencies {
+		if dep.Scope != "compile" && dep.Scope != "runtime" && dep.Scope != "" {
+			continue
+		}
+		pomProj.Dependencies = append(pomProj.Dependencies, pkg.Dependency{ArtifactID: dep.ArtifactID, Version: dep.Version, GroupID: dep.GroupID})
+	}
+
+	return pomProj, nil
 }
 
 func pomParent(parent gopom.Parent) (result *pkg.PomParent) {

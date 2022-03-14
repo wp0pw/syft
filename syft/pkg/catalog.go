@@ -69,6 +69,40 @@ func (c *Catalog) Packages(ids []artifact.ID) (result []Package) {
 	return result
 }
 
+// Remove a package by artifact ID
+func (c *Catalog) Remove(id artifact.ID) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	_, ok := c.byID[id]
+	if !ok {
+		return
+	}
+	delete(c.byID, id)
+
+	for k, ids := range c.idsByPath {
+		idx := -1
+		for i, d := range ids {
+			if d == id {
+				idx = i
+				break
+			}
+		}
+		c.idsByPath[k] = append(ids[:idx], ids[idx+1:]...)
+	}
+
+	for k, ids := range c.idsByType {
+		idx := -1
+		for i, d := range ids {
+			if d == id {
+				idx = i
+				break
+			}
+		}
+		c.idsByType[k] = append(ids[:idx], ids[idx+1:]...)
+	}
+}
+
 // Add a package to the Catalog.
 func (c *Catalog) Add(p Package) {
 	c.lock.Lock()

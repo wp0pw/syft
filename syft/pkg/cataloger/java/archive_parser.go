@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/anchore/syft/internal/file"
@@ -15,6 +16,9 @@ import (
 
 // integrity check
 var _ common.ParserFn = parseJavaArchive
+
+var regProject = regexp.MustCompile(`\${project.version}`)
+var regProp = regexp.MustCompile(`\${(.+)}`)
 
 var archiveFormatGlobs = []string{
 	"**/*.jar",
@@ -35,17 +39,18 @@ var archiveFormatGlobs = []string{
 }
 
 type archiveParser struct {
-	fileManifest file.ZipFileManifest
-	virtualPath  string
-	archivePath  string
-	contentPath  string
-	fileInfo     archiveFilename
-	detectNested bool
+	fileManifest       file.ZipFileManifest
+	virtualPath        string
+	archivePath        string
+	contentPath        string
+	fileInfo           archiveFilename
+	detectNested       bool
+	detectDependencies bool
 }
 
 // parseJavaArchive is a parser function for java archive contents, returning all Java libraries and nested archives.
 func parseJavaArchive(virtualPath string, reader io.Reader) ([]*pkg.Package, []artifact.Relationship, error) {
-	parser, cleanupFn, err := newJavaArchiveParser(virtualPath, reader, true)
+	parser, cleanupFn, err := newJavaArchiveParser(virtualPath, reader, true, true)
 	// note: even on error, we should always run cleanup functions
 	defer cleanupFn()
 	if err != nil {
@@ -64,7 +69,7 @@ func uniquePkgKey(p *pkg.Package) string {
 
 // newJavaArchiveParser returns a new java archive parser object for the given archive. Can be configured to discover
 // and parse nested archives or ignore them.
-func newJavaArchiveParser(virtualPath string, reader io.Reader, detectNested bool) (*archiveParser, func(), error) {
+func newJavaArchiveParser(virtualPath string, reader io.Reader, detectNested bool, detectDependencies bool) (*archiveParser, func(), error) {
 	// fetch the last element of the virtual path
 	virtualElements := strings.Split(virtualPath, ":")
 	currentFilepath := virtualElements[len(virtualElements)-1]
@@ -80,12 +85,13 @@ func newJavaArchiveParser(virtualPath string, reader io.Reader, detectNested boo
 	}
 
 	return &archiveParser{
-		fileManifest: fileManifest,
-		virtualPath:  virtualPath,
-		archivePath:  archivePath,
-		contentPath:  contentPath,
-		fileInfo:     newJavaArchiveFilename(currentFilepath),
-		detectNested: detectNested,
+		fileManifest:       fileManifest,
+		virtualPath:        virtualPath,
+		archivePath:        archivePath,
+		contentPath:        contentPath,
+		fileInfo:           newJavaArchiveFilename(currentFilepath),
+		detectNested:       detectNested,
+		detectDependencies: detectDependencies,
 	}, cleanupFn, nil
 }
 
@@ -170,6 +176,7 @@ func (j *archiveParser) discoverMainPackage() (*pkg.Package, error) {
 	}, nil
 }
 
+// TODO here we're in POM file
 // discoverPkgsFromAllMavenFiles parses Maven POM properties/xml for a given
 // parent package, returning all listed Java packages found for each pom
 // properties discovered and potentially updating the given parentPkg with new
@@ -186,7 +193,7 @@ func (j *archiveParser) discoverPkgsFromAllMavenFiles(parentPkg *pkg.Package) ([
 		return nil, err
 	}
 
-	projects, err := pomProjectByParentPath(j.archivePath, j.fileManifest.GlobMatch(pomXMLGlob), j.virtualPath)
+	projects, err := pomProjectByParentPath(j.archivePath, j.fileManifest.GlobMatch(pomXMLGlob), properties, j.virtualPath)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +204,14 @@ func (j *archiveParser) discoverPkgsFromAllMavenFiles(parentPkg *pkg.Package) ([
 			pomProject = &proj
 		}
 
-		pkgFromPom := newPackageFromMavenData(propertiesObj, pomProject, parentPkg, j.virtualPath)
-		if pkgFromPom != nil {
-			pkgs = append(pkgs, pkgFromPom)
+		if j.detectDependencies {
+			pkgsFromPom := newPackageFromMavenDataWithDeps(propertiesObj, pomProject, parentPkg, j.virtualPath)
+			pkgs = append(pkgs, pkgsFromPom...)
+		} else {
+			pkgFromPom := newPackageFromMavenData(propertiesObj, pomProject, parentPkg, j.virtualPath)
+			if pkgFromPom != nil {
+				pkgs = append(pkgs, pkgFromPom)
+			}
 		}
 	}
 
@@ -301,7 +313,7 @@ func pomPropertiesByParentPath(archivePath string, extractPaths []string, virtua
 	return propertiesByParentPath, nil
 }
 
-func pomProjectByParentPath(archivePath string, extractPaths []string, virtualPath string) (map[string]pkg.PomProject, error) {
+func pomProjectByParentPath(archivePath string, extractPaths []string, props map[string]pkg.PomProperties, virtualPath string) (map[string]pkg.PomProject, error) {
 	contentsOfMavenProjectFiles, err := file.ContentsFromZip(archivePath, extractPaths...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to extract maven files: %w", err)
@@ -320,13 +332,92 @@ func pomProjectByParentPath(archivePath string, extractPaths []string, virtualPa
 		}
 
 		if pomProject.Version == "" || pomProject.ArtifactID == "" {
-			// TODO: if there is no parentPkg (no java manifest) one of these poms could be the parent. We should discover the right parent and attach the correct info accordingly to each discovered package
-			continue
+			prop, exist := props[path.Dir(filePath)]
+			if exist {
+				pomProject.Version = prop.Version
+				pomProject.ArtifactID = prop.ArtifactID
+				pomProject.GroupID = prop.GroupID
+			}
 		}
 
 		projectByParentPath[path.Dir(filePath)] = *pomProject
 	}
 	return projectByParentPath, nil
+}
+
+// packagesFromPomProperties processes a single Maven POM properties for a given parent package, returning all listed Java packages found and
+// associating each discovered package to the given parent package. Note the pom.xml is optional, the pom.properties is not.
+func newPackageFromMavenDataWithDeps(pomProperties pkg.PomProperties, pomProject *pkg.PomProject, parentPkg *pkg.Package, virtualPath string) []*pkg.Package {
+	// keep the artifact name within the virtual path if this package does not match the parent package
+	vPathSuffix := ""
+	if !strings.HasPrefix(pomProperties.ArtifactID, parentPkg.Name) {
+		vPathSuffix += ":" + pomProperties.ArtifactID
+	}
+	virtualPath += vPathSuffix
+
+	packages := []*pkg.Package{}
+
+	// discovered props = new package
+	p := pkg.Package{
+		Name:         pomProperties.ArtifactID,
+		Version:      pomProperties.Version,
+		Language:     pkg.Java,
+		Type:         pomProperties.PkgTypeIndicated(),
+		MetadataType: pkg.JavaMetadataType,
+		Metadata: pkg.JavaMetadata{
+			VirtualPath:   virtualPath,
+			PomProperties: &pomProperties,
+			PomProject:    pomProject,
+			Parent:        parentPkg,
+		},
+	}
+
+	if packageIdentitiesMatch(p, parentPkg) {
+		updateParentPackage(p, parentPkg)
+	} else {
+		packages = append(packages, &p)
+	}
+
+	for _, dep := range pomProject.Dependencies {
+		version := getVersion(dep.Version, pomProperties, pomProject)
+		depP := pkg.Package{
+			Name:         dep.ArtifactID,
+			Version:      version,
+			Language:     pkg.Java,
+			Type:         pkg.JavaPkg,
+			MetadataType: pkg.JavaMetadataType,
+			Metadata: pkg.JavaMetadata{
+				VirtualPath: "",
+				PomProject: &pkg.PomProject{
+					GroupID:    dep.GroupID,
+					ArtifactID: dep.ArtifactID,
+					Version:    version,
+				},
+				PomProperties: &pkg.PomProperties{},
+				Parent:        &p,
+			},
+		}
+
+		if !packageIdentitiesMatch(depP, parentPkg) {
+			packages = append(packages, &depP)
+		}
+	}
+
+	return packages
+}
+
+func getVersion(versionStr string, pomProperties pkg.PomProperties, pomProject *pkg.PomProject) string {
+	if regProject.MatchString(versionStr) {
+		return pomProperties.Version
+	}
+
+	if matched := regProp.FindStringSubmatch(versionStr); len(matched) > 1 {
+		if v, ok := pomProject.Properties.Entries[matched[1]]; ok {
+			return v
+		}
+	}
+
+	return versionStr
 }
 
 // packagesFromPomProperties processes a single Maven POM properties for a given parent package, returning all listed Java packages found and
@@ -354,7 +445,7 @@ func newPackageFromMavenData(pomProperties pkg.PomProperties, pomProject *pkg.Po
 		},
 	}
 
-	if packageIdentitiesMatch(p, parentPkg) {
+	if packageIdentitiesMatch(p, parentPkg) || true {
 		updateParentPackage(p, parentPkg)
 		return nil
 	}
@@ -405,7 +496,7 @@ func updateParentPackage(p pkg.Package, parentPkg *pkg.Package) {
 	parentMetadata, ok := parentPkg.Metadata.(pkg.JavaMetadata)
 	if ok && parentMetadata.PomProperties == nil {
 		parentMetadata.PomProperties = &pomPropertiesCopy
-		parentPkg.Metadata = parentMetadata
+		parentPkg.Metadata = p.Metadata
 	}
 }
 
