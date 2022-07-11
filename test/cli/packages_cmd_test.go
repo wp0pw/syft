@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestPackagesCmdFlags(t *testing.T) {
+	hiddenPackagesImage := "docker-archive:" + getFixtureImage(t, "image-hidden-packages")
 	coverageImage := "docker-archive:" + getFixtureImage(t, "image-pkg-coverage")
 	//badBinariesImage := "docker-archive:" + getFixtureImage(t, "image-bad-binaries")
 	tmp := t.TempDir() + "/"
@@ -94,26 +96,39 @@ func TestPackagesCmdFlags(t *testing.T) {
 			name: "squashed-scope-flag",
 			args: []string{"packages", "-o", "json", "-s", "squashed", coverageImage},
 			assertions: []traitAssertion{
-				assertPackageCount(20),
+				assertPackageCount(34),
+				assertSuccessfulReturnCode,
+			},
+		},
+		{
+			name: "squashed-scope-flag-hidden-packages",
+			args: []string{"packages", "-o", "json", "-s", "squashed", hiddenPackagesImage},
+			assertions: []traitAssertion{
+				assertPackageCount(162),
+				assertNotInOutput("vsftpd"), // hidden package
 				assertSuccessfulReturnCode,
 			},
 		},
 		{
 			name: "all-layers-scope-flag",
-			args: []string{"packages", "-o", "json", "-s", "all-layers", coverageImage},
+			args: []string{"packages", "-o", "json", "-s", "all-layers", hiddenPackagesImage},
 			assertions: []traitAssertion{
-				assertPackageCount(22),
+				assertPackageCount(163), // packages are now deduplicated for this case
+				assertInOutput("all-layers"),
+				assertInOutput("vsftpd"), // hidden package
 				assertSuccessfulReturnCode,
 			},
 		},
 		{
 			name: "all-layers-scope-flag-by-env",
-			args: []string{"packages", "-o", "json", coverageImage},
+			args: []string{"packages", "-o", "json", hiddenPackagesImage},
 			env: map[string]string{
 				"SYFT_PACKAGE_CATALOGER_SCOPE": "all-layers",
 			},
 			assertions: []traitAssertion{
-				assertPackageCount(22),
+				assertPackageCount(163), // packages are now deduplicated for this case
+				assertInOutput("all-layers"),
+				assertInOutput("vsftpd"), // hidden package
 				assertSuccessfulReturnCode,
 			},
 		},
@@ -182,6 +197,42 @@ func TestPackagesCmdFlags(t *testing.T) {
 				// package-cataloger-level options.
 				assertInOutput("search-unindexed-archives: true"),
 				assertInOutput("search-indexed-archives: false"),
+			},
+		},
+		{
+			name: "platform-option-wired-up",
+			args: []string{"packages", "--platform", "arm64", "-o", "json", "registry:busybox:1.31"},
+			assertions: []traitAssertion{
+				assertInOutput("sha256:1ee006886991ad4689838d3a288e0dd3fd29b70e276622f16b67a8922831a853"), // linux/arm64 image digest
+				assertSuccessfulReturnCode,
+			},
+		},
+		{
+			name: "json-file-flag",
+			args: []string{"packages", "-o", "json", "--file", filepath.Join(tmp, "output-1.json"), coverageImage},
+			assertions: []traitAssertion{
+				assertSuccessfulReturnCode,
+				assertFileOutput(t, filepath.Join(tmp, "output-1.json"),
+					assertJsonReport,
+				),
+			},
+		},
+		{
+			name: "json-output-flag-to-file",
+			args: []string{"packages", "-o", fmt.Sprintf("json=%s", filepath.Join(tmp, "output-2.json")), coverageImage},
+			assertions: []traitAssertion{
+				assertSuccessfulReturnCode,
+				assertFileOutput(t, filepath.Join(tmp, "output-2.json"),
+					assertJsonReport,
+				),
+			},
+		},
+		{
+			name: "catalogers-option",
+			args: []string{"packages", "-o", "json", "--catalogers", "python,ruby-gemspec", coverageImage},
+			assertions: []traitAssertion{
+				assertPackageCount(6),
+				assertSuccessfulReturnCode,
 			},
 		},
 	}

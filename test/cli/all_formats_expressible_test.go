@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anchore/syft/syft/format"
+	"github.com/stretchr/testify/require"
+
+	"github.com/anchore/syft/internal/formats/template"
+	"github.com/anchore/syft/syft"
 )
 
 func TestAllFormatsExpressible(t *testing.T) {
@@ -18,10 +21,16 @@ func TestAllFormatsExpressible(t *testing.T) {
 		},
 		assertSuccessfulReturnCode,
 	}
-
-	for _, o := range format.AllOptions {
+	formats := syft.FormatIDs()
+	require.NotEmpty(t, formats)
+	for _, o := range formats {
 		t.Run(fmt.Sprintf("format:%s", o), func(t *testing.T) {
-			cmd, stdout, stderr := runSyft(t, nil, "dir:./test-fixtures/image-pkg-coverage", "-o", string(o))
+			args := []string{"dir:./test-fixtures/image-pkg-coverage", "-o", string(o)}
+			if o == template.ID {
+				args = append(args, "-t", "test-fixtures/csv.template")
+			}
+
+			cmd, stdout, stderr := runSyft(t, nil, args...)
 			for _, traitFn := range commonAssertions {
 				traitFn(t, stdout, stderr, cmd.ProcessState.ExitCode())
 			}

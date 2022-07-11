@@ -30,11 +30,11 @@ func NewCPE(cpeStr string) (CPE, error) {
 	// get a CPE object based on the given string --don't validate yet since it may be possible to escape select cases on the callers behalf
 	c, err := newCPEWithoutValidation(cpeStr)
 	if err != nil {
-		return CPE{}, fmt.Errorf("unable to prase CPE string: %w", err)
+		return CPE{}, fmt.Errorf("unable to parse CPE string: %w", err)
 	}
 
 	// ensure that this CPE can be validated after being fully sanitized
-	if validateCPEString(CPEString(c)) != nil {
+	if ValidateCPEString(CPEString(c)) != nil {
 		return CPE{}, err
 	}
 
@@ -43,7 +43,7 @@ func NewCPE(cpeStr string) (CPE, error) {
 	return c, nil
 }
 
-func validateCPEString(cpeStr string) error {
+func ValidateCPEString(cpeStr string) error {
 	// We should filter out all CPEs that do not match the official CPE regex
 	// The facebook nvdtools parser can sometimes incorrectly parse invalid CPE strings
 	if !cpeRegex.MatchString(cpeStr) {

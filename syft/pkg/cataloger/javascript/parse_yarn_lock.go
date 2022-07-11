@@ -16,18 +16,25 @@ import (
 var _ common.ParserFn = parseYarnLock
 
 var (
-	// composedNameExp matches the "composed" variant of yarn.lock entry names,
-	// where the name appears in quotes and is prefixed with @<some-namespace>.
-	// For example: "@babel/code-frame@^7.0.0"
-	composedNameExp = regexp.MustCompile(`^"(@[^@]+)`)
-
-	// simpleNameExp matches the "simple" variant of yarn.lock entry names, for packages with no namespace prefix.
-	// For example: aws-sdk@2.706.0
-	simpleNameExp = regexp.MustCompile(`^(\w[\w-_.]*)@`)
+	// packageNameExp matches the name of the dependency in yarn.lock
+	// including scope/namespace prefix if found.
+	// For example: "aws-sdk@2.706.0" returns "aws-sdk"
+	//              "@babel/code-frame@^7.0.0" returns "@babel/code-frame"
+	packageNameExp = regexp.MustCompile(`^"?((?:@\w[\w-_.]*\/)?\w[\w-_.]*)@`)
 
 	// versionExp matches the "version" line of a yarn.lock entry and captures the version value.
 	// For example: version "4.10.1" (...and the value "4.10.1" is captured)
-	versionExp = regexp.MustCompile(`^\W+version\W+"([\w-_.]+)"`)
+	versionExp = regexp.MustCompile(`^\W+version(?:\W+"|:\W+)([\w-_.]+)"?`)
+
+	// packageURLExp matches the name and version of the dependency in yarn.lock
+	// from the resolved URL, including scope/namespace prefix if any.
+	// For example:
+	//		`resolved "https://registry.yarnpkg.com/async/-/async-3.2.3.tgz#ac53dafd3f4720ee9e8a160628f18ea91df196c9"`
+	//			would return "async" and "3.2.3"
+	//
+	//		`resolved "https://registry.yarnpkg.com/@4lolo/resize-observer-polyfill/-/resize-observer-polyfill-1.5.2.tgz#58868fc7224506236b5550d0c68357f0a874b84b"`
+	//			would return "@4lolo/resize-observer-polyfill" and "1.5.2"
+	packageURLExp = regexp.MustCompile(`^\s+resolved\s+"https://registry\.(?:yarnpkg\.com|npmjs\.org)/(.+?)/-/(?:.+?)-(\d+\..+?)\.tgz`)
 )
 
 const (
@@ -46,37 +53,35 @@ func parseYarnLock(path string, reader io.Reader) ([]*pkg.Package, []artifact.Re
 	scanner := bufio.NewScanner(reader)
 	parsedPackages := internal.NewStringSet()
 	currentPackage := noPackage
+	currentVersion := noVersion
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if currentPackage == noPackage {
-			// Scan until we find the next package
-
-			packageName := findPackageName(line)
-			if packageName == noPackage {
-				continue
-			}
-
-			if parsedPackages.Contains(packageName) {
-				// We don't parse repeated package declarations.
-				continue
+		if packageName := findPackageName(line); packageName != noPackage {
+			// When we find a new package, check if we have unsaved identifiers
+			if currentPackage != noPackage && currentVersion != noVersion && !parsedPackages.Contains(currentPackage+"@"+currentVersion) {
+				packages = append(packages, newYarnLockPackage(currentPackage, currentVersion))
+				parsedPackages.Add(currentPackage + "@" + currentVersion)
 			}
 
 			currentPackage = packageName
-			parsedPackages.Add(currentPackage)
+		} else if version := findPackageVersion(line); version != noVersion {
+			currentVersion = version
+		} else if packageName, version := findPackageAndVersion(line); packageName != noPackage && version != noVersion && !parsedPackages.Contains(packageName+"@"+version) {
+			packages = append(packages, newYarnLockPackage(packageName, version))
+			parsedPackages.Add(packageName + "@" + version)
 
-			continue
-		}
-
-		// We've found the package entry, now we just need the version
-
-		if version := findPackageVersion(line); version != noVersion {
-			packages = append(packages, newYarnLockPackage(currentPackage, version))
+			// Cleanup to indicate no unsaved identifiers
 			currentPackage = noPackage
-
-			continue
+			currentVersion = noVersion
 		}
+	}
+
+	// check if we have valid unsaved data after end-of-file has reached
+	if currentPackage != noPackage && currentVersion != noVersion && !parsedPackages.Contains(currentPackage+"@"+currentVersion) {
+		packages = append(packages, newYarnLockPackage(currentPackage, currentVersion))
+		parsedPackages.Add(currentPackage + "@" + currentVersion)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -87,11 +92,7 @@ func parseYarnLock(path string, reader io.Reader) ([]*pkg.Package, []artifact.Re
 }
 
 func findPackageName(line string) string {
-	if matches := composedNameExp.FindStringSubmatch(line); len(matches) >= 2 {
-		return matches[1]
-	}
-
-	if matches := simpleNameExp.FindStringSubmatch(line); len(matches) >= 2 {
+	if matches := packageNameExp.FindStringSubmatch(line); len(matches) >= 2 {
 		return matches[1]
 	}
 
@@ -104,6 +105,14 @@ func findPackageVersion(line string) string {
 	}
 
 	return noVersion
+}
+
+func findPackageAndVersion(line string) (string, string) {
+	if matches := packageURLExp.FindStringSubmatch(line); len(matches) >= 2 {
+		return matches[1], matches[2]
+	}
+
+	return noPackage, noVersion
 }
 
 func newYarnLockPackage(name, version string) *pkg.Package {

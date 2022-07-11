@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"github.com/anchore/syft/syft/source"
 	"strings"
 	"testing"
 
@@ -9,18 +10,18 @@ import (
 
 func TestRegressionGoArchDiscovery(t *testing.T) {
 	const (
-		expectedELFPkg   = 3
-		expectedWINPkg   = 3
-		expectedMACOSPkg = 3
+		expectedELFPkg   = 4
+		expectedWINPkg   = 4
+		expectedMACOSPkg = 4
 	)
 	// This is a regression test to make sure the way we detect go binary packages
 	// stays consistent and reproducible as the tool chain evolves
-	sbom, _ := catalogFixtureImage(t, "image-go-bin-arch-coverage")
+	sbom, _ := catalogFixtureImage(t, "image-go-bin-arch-coverage", source.SquashedScope)
 
 	var actualELF, actualWIN, actualMACOS int
 
 	for p := range sbom.Artifacts.PackageCatalog.Enumerate(pkg.GoModulePkg) {
-		for _, l := range p.Locations {
+		for _, l := range p.Locations.ToSlice() {
 			switch {
 			case strings.Contains(l.RealPath, "elf"):
 				actualELF++

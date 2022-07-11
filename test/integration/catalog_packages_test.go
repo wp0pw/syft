@@ -3,6 +3,8 @@ package integration
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/anchore/syft/syft/linux"
 	"github.com/anchore/syft/syft/pkg/cataloger"
 	"github.com/google/go-cmp/cmp"
@@ -22,7 +24,10 @@ func BenchmarkImagePackageCatalogers(b *testing.B) {
 	var pc *pkg.Catalog
 	for _, c := range cataloger.ImageCatalogers(cataloger.DefaultConfig()) {
 		// in case of future alteration where state is persisted, assume no dependency is safe to reuse
-		theSource, cleanupSource, err := source.New("docker-archive:"+tarPath, nil, nil)
+		userInput := "docker-archive:" + tarPath
+		sourceInput, err := source.ParseInput(userInput, "", false)
+		require.NoError(b, err)
+		theSource, cleanupSource, err := source.New(*sourceInput, nil, nil)
 		b.Cleanup(cleanupSource)
 		if err != nil {
 			b.Fatalf("unable to get source: %+v", err)
@@ -49,7 +54,7 @@ func BenchmarkImagePackageCatalogers(b *testing.B) {
 }
 
 func TestPkgCoverageImage(t *testing.T) {
-	sbom, _ := catalogFixtureImage(t, "image-pkg-coverage")
+	sbom, _ := catalogFixtureImage(t, "image-pkg-coverage", source.SquashedScope)
 
 	observedLanguages := internal.NewStringSet()
 	definedLanguages := internal.NewStringSet()
@@ -60,6 +65,10 @@ func TestPkgCoverageImage(t *testing.T) {
 	// for image scans we should not expect to see any of the following package types
 	definedLanguages.Remove(pkg.Go.String())
 	definedLanguages.Remove(pkg.Rust.String())
+	definedLanguages.Remove(pkg.Dart.String())
+	definedLanguages.Remove(pkg.Dotnet.String())
+	definedLanguages.Remove(string(pkg.Swift.String()))
+	definedLanguages.Remove(pkg.CPP.String())
 
 	observedPkgs := internal.NewStringSet()
 	definedPkgs := internal.NewStringSet()
@@ -71,6 +80,10 @@ func TestPkgCoverageImage(t *testing.T) {
 	definedPkgs.Remove(string(pkg.KbPkg))
 	definedPkgs.Remove(string(pkg.GoModulePkg))
 	definedPkgs.Remove(string(pkg.RustPkg))
+	definedPkgs.Remove(string(pkg.DartPubPkg))
+	definedPkgs.Remove(string(pkg.DotnetPkg))
+	definedPkgs.Remove(string(pkg.CocoapodsPkg))
+	definedPkgs.Remove(string(pkg.ConanPkg))
 
 	var cases []testCase
 	cases = append(cases, commonTestCases...)
@@ -81,7 +94,6 @@ func TestPkgCoverageImage(t *testing.T) {
 			pkgCount := 0
 
 			for a := range sbom.Artifacts.PackageCatalog.Enumerate(c.pkgType) {
-
 				if a.Language.String() != "" {
 					observedLanguages.Add(a.Language.String())
 				}
@@ -158,7 +170,6 @@ func TestPkgCoverageDirectory(t *testing.T) {
 			actualPkgCount := 0
 
 			for actualPkg := range sbom.Artifacts.PackageCatalog.Enumerate(test.pkgType) {
-
 				observedLanguages.Add(actualPkg.Language.String())
 				observedPkgs.Add(string(actualPkg.Type))
 

@@ -10,9 +10,25 @@ import (
 	"testing"
 
 	"github.com/acarl005/stripansi"
+	"github.com/stretchr/testify/require"
 )
 
 type traitAssertion func(tb testing.TB, stdout, stderr string, rc int)
+
+func assertFileOutput(tb testing.TB, path string, assertions ...traitAssertion) traitAssertion {
+	tb.Helper()
+
+	return func(tb testing.TB, _, stderr string, rc int) {
+		content, err := os.ReadFile(path)
+		require.NoError(tb, err)
+		contentStr := string(content)
+
+		for _, assertion := range assertions {
+			// treat the file content as stdout
+			assertion(tb, contentStr, stderr, rc)
+		}
+	}
+}
 
 func assertJsonReport(tb testing.TB, stdout, _ string, _ int) {
 	tb.Helper()
@@ -136,7 +152,7 @@ func assertVerifyAttestation(coverageImage string) traitAssertion {
 			coverageImage, // TODO which remote image to use?
 		)
 
-		stdout, stderr := runCommand(attachCmd, nil)
+		stdout, stderr, _ := runCommand(attachCmd, nil)
 		if attachCmd.ProcessState.ExitCode() != 0 {
 			tb.Log("STDOUT", stdout)
 			tb.Log("STDERR", stderr)
@@ -149,7 +165,7 @@ func assertVerifyAttestation(coverageImage string) traitAssertion {
 			coverageImage, // TODO which remote image to use?
 		)
 
-		stdout, stderr = runCommand(verifyCmd, nil)
+		stdout, stderr, _ = runCommand(verifyCmd, nil)
 		if attachCmd.ProcessState.ExitCode() != 0 {
 			tb.Log("STDOUT", stdout)
 			tb.Log("STDERR", stderr)

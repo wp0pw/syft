@@ -11,7 +11,7 @@ type Language string
 
 const (
 	// the full set of supported programming languages
-	UnknownLanguage Language = "UnknownLanguage"
+	UnknownLanguage Language = ""
 	Java            Language = "java"
 	JavaScript      Language = "javascript"
 	Python          Language = "python"
@@ -19,6 +19,10 @@ const (
 	Ruby            Language = "ruby"
 	Go              Language = "go"
 	Rust            Language = "rust"
+	Dart            Language = "dart"
+	Dotnet          Language = "dotnet"
+	Swift           Language = "swift"
+	CPP             Language = "c++"
 )
 
 // AllLanguages is a set of all programming languages detected by syft.
@@ -30,6 +34,10 @@ var AllLanguages = []Language{
 	Ruby,
 	Go,
 	Rust,
+	Dart,
+	Dotnet,
+	Swift,
+	CPP,
 }
 
 // String returns the string representation of the language.
@@ -54,14 +62,22 @@ func LanguageByName(name string) Language {
 		return PHP
 	case packageurl.TypeGolang, string(GoModulePkg), string(Go):
 		return Go
-	case packageurl.TypeNPM, string(JavaScript):
+	case packageurl.TypeNPM, string(JavaScript), "nodejs", "node.js":
 		return JavaScript
 	case packageurl.TypePyPi, string(Python):
 		return Python
-	case packageurl.TypeGem:
+	case packageurl.TypeGem, string(Ruby):
 		return Ruby
-	case purlCargoPkgType:
+	case purlCargoPkgType, string(RustPkg), string(Rust):
 		return Rust
+	case packageurl.TypePub, string(DartPubPkg), string(Dart):
+		return Dart
+	case packageurl.TypeDotnet:
+		return Dotnet
+	case packageurl.TypeCocoapods, packageurl.TypeSwift, string(CocoapodsPkg):
+		return Swift
+	case packageurl.TypeConan, string(CPP):
+		return CPP
 	default:
 		return UnknownLanguage
 	}

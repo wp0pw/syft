@@ -1,9 +1,10 @@
 package pkg
 
 import (
+	"testing"
+
 	"github.com/scylladb/go-set/strset"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestLanguageFromPURL(t *testing.T) {
@@ -30,6 +31,14 @@ func TestLanguageFromPURL(t *testing.T) {
 			want: Go,
 		},
 		{
+			purl: "pkg:pub/util@1.2.34",
+			want: Dart,
+		},
+		{
+			purl: "pkg:dotnet/Microsoft.CodeAnalysis.Razor@2.2.0",
+			want: Dotnet,
+		},
+		{
 			purl: "pkg:cargo/clap@2.33.0",
 			want: Rust,
 		},
@@ -40,6 +49,14 @@ func TestLanguageFromPURL(t *testing.T) {
 		{
 			purl: "pkg:maven/org.apache.xmlgraphics/batik-anim@1.9.1?type=zip&classifier=dist",
 			want: Java,
+		},
+		{
+			purl: "pkg:cocoapods/GlossButtonNode@3.1.2",
+			want: Swift,
+		},
+		{
+			purl: "pkg:conan/catch2@2.13.8",
+			want: CPP,
 		},
 	}
 
@@ -63,4 +80,140 @@ func TestLanguageFromPURL(t *testing.T) {
 
 	assert.ElementsMatch(t, expectedLanguages.List(), languages, "missing one or more languages to test against (maybe a package type was added?)")
 
+}
+
+func TestLanguageByName(t *testing.T) {
+	tests := []struct {
+		name     string
+		language Language
+	}{
+		{
+			name:     "maven",
+			language: Java,
+		},
+		{
+			name:     "java",
+			language: Java,
+		},
+		{
+			name:     "java-archive",
+			language: Java,
+		},
+		{
+			name:     "java",
+			language: Java,
+		},
+		{
+			name:     "composer",
+			language: PHP,
+		},
+		{
+			name:     "php-composer",
+			language: PHP,
+		},
+		{
+			name:     "php",
+			language: PHP,
+		},
+		{
+			name:     "go",
+			language: Go,
+		},
+		{
+			name:     "golang",
+			language: Go,
+		},
+		{
+			name:     "go-module",
+			language: Go,
+		},
+		{
+			name:     "npm",
+			language: JavaScript,
+		},
+		{
+			name:     "javascript",
+			language: JavaScript,
+		},
+		{
+			name:     "node.js",
+			language: JavaScript,
+		},
+		{
+			name:     "nodejs",
+			language: JavaScript,
+		},
+		{
+			name:     "pypi",
+			language: Python,
+		},
+		{
+			name:     "python",
+			language: Python,
+		},
+		{
+			name:     "gem",
+			language: Ruby,
+		},
+		{
+			name:     "ruby",
+			language: Ruby,
+		},
+		{
+			name:     "rust",
+			language: Rust,
+		},
+		{
+			name:     "rust-crate",
+			language: Rust,
+		},
+		{
+			name:     "cargo",
+			language: Rust,
+		},
+		{
+			name:     "dart",
+			language: Dart,
+		},
+		{
+			name:     "dart-pub",
+			language: Dart,
+		},
+		{
+			name:     "pub",
+			language: Dart,
+		},
+		{
+			name:     "dotnet",
+			language: Dotnet,
+		},
+		{
+			name:     "swift",
+			language: Swift,
+		},
+		{
+			name:     "pod",
+			language: Swift,
+		},
+		{
+			name:     "cocoapods",
+			language: Swift,
+		},
+		{
+			name:     "unknown",
+			language: UnknownLanguage,
+		},
+		{
+			name:     "conan",
+			language: CPP,
+		},
+		{
+			name:     "c++",
+			language: CPP,
+		},
+	}
+
+	for _, test := range tests {
+		assert.Equal(t, LanguageByName(test.name), test.language)
+	}
 }

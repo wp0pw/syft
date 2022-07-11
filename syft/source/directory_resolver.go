@@ -132,10 +132,15 @@ func (r *directoryResolver) indexTree(root string, stager *progress.Stage) ([]st
 }
 
 func (r *directoryResolver) indexPath(path string, info os.FileInfo, err error) (string, error) {
+	// link cycles could cause a revisit --we should not allow this
+	if r.hasBeenIndexed(path) {
+		return "", nil
+	}
+
 	// ignore any path which a filter function returns true
 	for _, filterFn := range r.pathFilterFns {
 		if filterFn != nil && filterFn(path, info) {
-			if info.IsDir() {
+			if info != nil && info.IsDir() {
 				return "", fs.SkipDir
 			}
 			return "", nil
@@ -143,11 +148,6 @@ func (r *directoryResolver) indexPath(path string, info os.FileInfo, err error) 
 	}
 
 	if r.isFileAccessErr(path, err) {
-		return "", nil
-	}
-
-	// link cycles could cause a revisit --we should not allow this
-	if r.fileTree.HasPath(file.Path(path)) {
 		return "", nil
 	}
 
@@ -191,6 +191,23 @@ func (r directoryResolver) addPathToIndex(p string, info os.FileInfo) (string, e
 	default:
 		return "", fmt.Errorf("unsupported file type: %s", t)
 	}
+}
+
+func (r directoryResolver) hasBeenIndexed(p string) bool {
+	filePath := file.Path(p)
+	if !r.fileTree.HasPath(filePath) {
+		return false
+	}
+
+	exists, ref, err := r.fileTree.File(filePath)
+	if err != nil || !exists || ref == nil {
+		return false
+	}
+
+	// cases like "/" will be in the tree, but not been indexed yet (a special case). We want to capture
+	// these cases as new paths to index.
+	_, exists = r.metadata[ref.ID()]
+	return exists
 }
 
 func (r directoryResolver) addDirectoryToIndex(p string, info os.FileInfo) error {
@@ -321,7 +338,7 @@ func (r directoryResolver) FilesByPath(userPaths ...string) ([]Location, error) 
 		// we should be resolving symlinks and preserving this information as a VirtualPath to the real file
 		evaluatedPath, err := filepath.EvalSymlinks(userStrPath)
 		if err != nil {
-			log.Warnf("directory resolver unable to evaluate symlink for path=%q : %+v", userPath, err)
+			log.Debugf("directory resolver unable to evaluate symlink for path=%q : %+v", userPath, err)
 			continue
 		}
 
